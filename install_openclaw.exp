@@ -1,0 +1,28 @@
+#!/usr/bin/expect -f
+set timeout 180
+set password "CopilotCandidatic2026!#a"
+set ip "64.23.180.202"
+
+spawn ssh -o StrictHostKeyChecking=accept-new root@$ip
+expect {
+    "assword:" {
+        send "$password\r"
+        exp_continue
+    }
+    "root@" {
+        send "curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -\r"
+        expect "root@"
+        send "apt-get update -y && apt-get install -y nodejs redis-server git nano\r"
+        expect "root@"
+        send "npm install -g pnpm pm2 openclaw@latest\r"
+        expect "root@"
+        send "systemctl enable redis-server && systemctl start redis-server\r"
+        expect "root@"
+        send "rm -rf /root/CandidaticClaw && git clone https://github.com/Oscarjrdz/CandidaticClaw.git /root/CandidaticClaw && cd /root/CandidaticClaw/backend\r"
+        expect "root@"
+        send "echo 'OPENCLAW READY'\r"
+        expect "root@"
+        send "exit\r"
+    }
+}
+expect eof
