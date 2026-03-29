@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { OpenClaw } from 'openclaw';
+import * as openclaw from 'openclaw';
 import fs from 'fs';
 import path from 'path';
 
