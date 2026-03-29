@@ -1,9 +1,9 @@
-const { Anthropic } = require('@anthropic-ai/sdk');
+const { OpenAI } = require('openai');
 const { AgentMemory } = require('../memory/redis');
 
 // Inicializado solo si existe la key en el .env
-const anthropic = process.env.ANTHROPIC_API_KEY 
-    ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) 
+const openai = process.env.OPENAI_API_KEY 
+    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) 
     : null;
 
 class CopilotAgent {
@@ -20,37 +20,41 @@ Sé asertivo, extremadamente eficiente y no respondas con cortesías excesivas. 
      * @param {string} userInput - Texto o transcripción de audio.
      */
     async processCommand(userInput) {
-        if (!anthropic) {
-            return "[Error de Configuración] ANTHROPIC_API_KEY no detectada. Por favor configura el Daemon.";
+        if (!openai) {
+            return "[Error de Configuración] OPENAI_API_KEY no detectada. Por favor configura el Daemon.";
         }
 
         console.log(`[Copilot] 🧠 Procesando orden vía ${this.channel}: "${userInput.slice(0, 50)}..."`);
         
-        // 1. Recuperar memoria persistente de sesión
+        // 1. Recuperar memoria persistente de sesión y agregar prompt root
         let history = await AgentMemory.getHistory(this.sessionId);
-        history.push({ role: 'user', content: userInput });
+        
+        // Inyectar System Prompt como primer mensaje (Developer message para o1/gpt-4o)
+        const messages = [
+            { role: 'developer', content: this.systemPrompt },
+            ...history,
+            { role: 'user', content: userInput }
+        ];
 
         try {
-            // 2. Inferencia Cognitiva usando Claude 3.5
-            // Nota: Aquí luego inyectaremos el array de `tools` para que llame directamente a CandidaticDb
-            const response = await anthropic.messages.create({
-                model: 'claude-3-5-sonnet-latest',
+            // 2. Inferencia Cognitiva usando GPT-4o
+            const response = await openai.chat.completions.create({
+                model: 'gpt-4o',
                 max_tokens: 1024,
-                temperature: 0.1, // Respuestas lógicas y directas, cero halucinaciones 
-                system: this.systemPrompt,
-                messages: history
+                temperature: 0.1, // Respuestas lógicas y directas, cero alucinaciones 
+                messages: messages
             });
 
-            const reply = response.content[0].text;
+            const reply = response.choices[0].message.content;
             
-            // 3. Guardar estado mental
+            // 3. Guardar estado mental en Redis (excluyendo el developer prompt)
+            history.push({ role: 'user', content: userInput });
             history.push({ role: 'assistant', content: reply });
             await AgentMemory.saveHistory(this.sessionId, history);
 
-            // Log gráfico del pensamiento (ideal para enviarlo vía /api al Dashboard)
+            // Log gráfico del pensamiento
             console.log(`[Copilot] 💡 Decisión: ${reply}`);
 
-            // Retornamos el payload que se le enviará de regreso por WP/Telegram
             return reply;
 
         } catch (error) {
