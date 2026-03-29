@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "model": "google/gemini-1.5-flash"
+  },
+  "gateway": {
+    "auth": {
+      "mode": "password"
+    }
+  },
+  "channels": {
+    "whatsapp": {
+      "groups": {
+        "*": {
+          "requireMention": false
+        }
+      }
+    },
+    "telegram": {
+      "botToken": "PON_TU_TOKEN_DE_TELEGRAM_AQUI"
+    }
+  }
+}
