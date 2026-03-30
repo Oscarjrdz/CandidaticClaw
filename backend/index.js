@@ -107,10 +107,25 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_API_KEY no configurada');
 
+  const tools = [{
+      functionDeclarations: [{
+        name: "publishToFacebook",
+        description: "Publica texto directamente en la página de Facebook oficial si el usuario te lo pide.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            message: { type: "STRING", description: "El contenido (post) que se publicará." }
+          },
+          required: ["message"]
+        }
+      }]
+  }];
+
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
     systemInstruction: getSystemPrompt(),
+    tools
   });
 
   if (!chatSessions.has(sessionKey)) chatSessions.set(sessionKey, []);
@@ -122,7 +137,35 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
   const webContext = await enrichWithBrowser(userMessage).catch(() => null);
   const finalMessage = webContext ? `${webContext}\n\nPregunta: ${userMessage}` : userMessage;
 
-  const result = await chat.sendMessage(finalMessage);
+  let result = await chat.sendMessage(finalMessage);
+  
+  // Procesar posibles "Llamadas a Funciones" nativas (Tools)
+  const functionCalls = result.response.functionCalls();
+  if (functionCalls && functionCalls.length > 0) {
+    const call = functionCalls[0];
+    if (call.name === 'publishToFacebook') {
+      const fbMsg = call.args.message;
+      let fbRes = "[POST ENVIADO A LA COLA EXITOSAMENTE]";
+      const webhookUrl = process.env.FB_WEBHOOK_URL;
+      
+      if (webhookUrl) {
+         try {
+           const res = await fetch(webhookUrl, { 
+             method: 'POST', body: JSON.stringify({ message: fbMsg }), headers: {'Content-Type': 'application/json'} 
+           });
+           if (!res.ok) fbRes = "[POST FALLIDO: RECHAZADO POR EL PUENTE]";
+         } catch(e) { fbRes = "[POST FALLIDO: ERROR DE RED AL CONECTAR CON MAKE.COM]"; }
+      } else {
+         fbRes = "[POST DENEGADO: VARIABLE DE ENTORNO FB_WEBHOOK_URL NO CONFIGURADA EN EL SERVIDOR VPS]";
+      }
+      
+      // Enviamos el resultado de la función de vuelta a Gemini para que termine su respuesta
+      result = await chat.sendMessage([{
+        functionResponse: { name: "publishToFacebook", response: { result: fbRes } }
+      }]);
+    }
+  }
+
   const reply = result.response.text();
 
   history.push({ role: 'user',  parts: [{ text: userMessage }] });
