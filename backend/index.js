@@ -118,7 +118,7 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
             properties: {
               message: { type: "STRING" },
               imageUrl: { type: "STRING", description: "Opcional. URL de foto." },
-              scheduleTime: { type: "STRING", description: "Opcional. Hora y fecha para publicar a futuro (ej: 'mañana a las 5:15 PM')." }
+              scheduleTime: { type: "STRING", description: "Opcional. Fecha y hora EXACTA en formato estricto ISO 8601 (ej: '2026-03-31T17:15:00Z') calculada a partir de la hora actual. Indispensable para programaciones." }
             },
             required: ["message"]
           }
