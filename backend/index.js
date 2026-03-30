@@ -114,7 +114,8 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
         parameters: {
           type: "OBJECT",
           properties: {
-            message: { type: "STRING", description: "El contenido (post) que se publicará." }
+            message: { type: "STRING", description: "El contenido (post) que se publicará." },
+            imageUrl: { type: "STRING", description: "URL de una imagen pública (jpg/png) si consideras que mejoraría el post. Déjalo vacío si no tienes foto." }
           },
           required: ["message"]
         }
@@ -145,13 +146,14 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
     const call = functionCalls[0];
     if (call.name === 'publishToFacebook') {
       const fbMsg = call.args.message;
+      const fbImg = call.args.imageUrl;
       let fbRes = "[POST ENVIADO A LA COLA EXITOSAMENTE]";
       const webhookUrl = process.env.FB_WEBHOOK_URL;
       
       if (webhookUrl) {
          try {
            const res = await fetch(webhookUrl, { 
-             method: 'POST', body: JSON.stringify({ message: fbMsg }), headers: {'Content-Type': 'application/json'} 
+             method: 'POST', body: JSON.stringify({ message: fbMsg, imageUrl: fbImg }), headers: {'Content-Type': 'application/json'} 
            });
            if (!res.ok) fbRes = "[POST FALLIDO: RECHAZADO POR EL PUENTE]";
          } catch(e) { fbRes = "[POST FALLIDO: ERROR DE RED AL CONECTAR CON MAKE.COM]"; }
