@@ -120,7 +120,7 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
           required: ["message"]
         }
       }]
-  }];
+  }, { googleSearch: {} }];
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
