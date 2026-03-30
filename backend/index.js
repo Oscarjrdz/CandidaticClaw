@@ -108,19 +108,32 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
   if (!apiKey) throw new Error('GOOGLE_API_KEY no configurada');
 
   const tools = [{
-      functionDeclarations: [{
-        name: "publishToFacebook",
-        description: "Publica texto directamente en la página de Facebook oficial si el usuario te lo pide.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            message: { type: "STRING", description: "El contenido (post) que se publicará." },
-            imageUrl: { type: "STRING", description: "URL de una imagen pública (jpg/png) si consideras que mejoraría el post. Déjalo vacío si no tienes foto." }
-          },
-          required: ["message"]
+      functionDeclarations: [
+        {
+          name: "publishToFacebook",
+          description: "Publica texto en Facebook.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              message: { type: "STRING" },
+              imageUrl: { type: "STRING", description: "Opcional. URL de foto." }
+            },
+            required: ["message"]
+          }
+        },
+        {
+          name: "searchWeb",
+          description: "Busca noticias recientes o información en internet (DuckDuckGo/Google) para obtener datos reales en vivo sin alucinar.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "La búsqueda a realizar (ej: 'Noticias principales de elnorte.com hoy')" }
+            },
+            required: ["query"]
+          }
         }
-      }]
-  }, { googleSearch: {} }];
+      ]
+  }];
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
@@ -134,37 +147,42 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
 
   const chat = model.startChat({ history });
 
-  // Enriquecer mensaje si navega un sitio web
   const webContext = await enrichWithBrowser(userMessage).catch(() => null);
   const finalMessage = webContext ? `${webContext}\n\nPregunta: ${userMessage}` : userMessage;
 
   let result = await chat.sendMessage(finalMessage);
   
-  // Procesar posibles "Llamadas a Funciones" nativas (Tools)
   const functionCalls = result.response.functionCalls();
   if (functionCalls && functionCalls.length > 0) {
     const call = functionCalls[0];
-    if (call.name === 'publishToFacebook') {
+    
+    if (call.name === 'searchWeb') {
+      const q = call.args.query;
+      let searchRes = "[BÚSQUEDA FALLIDA]";
+      try {
+        const resp = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+        const html = await resp.text();
+        const snippets = [...html.matchAll(/<a class="result__snippet[^>]+>([\s\S]*?)<\/a>/g)].slice(0, 5).map(m => m[1].replace(/<[^>]+>/g, '')).join('\n— ');
+        searchRes = snippets.length > 10 ? `[RESULTADOS REALES DE BÚSQUEDA PARA "${q}"]\n— ${snippets}` : "[Cero resultados encontrados]";
+      } catch(e) { searchRes = "[Error de red buscando en internet]"; }
+      
+      result = await chat.sendMessage([{ functionResponse: { name: "searchWeb", response: { result: searchRes } } }]);
+    }
+    else if (call.name === 'publishToFacebook') {
       const fbMsg = call.args.message;
       const fbImg = call.args.imageUrl;
       let fbRes = "[POST ENVIADO A LA COLA EXITOSAMENTE]";
       const webhookUrl = process.env.FB_WEBHOOK_URL;
-      
       if (webhookUrl) {
          try {
-           const res = await fetch(webhookUrl, { 
-             method: 'POST', body: JSON.stringify({ message: fbMsg, imageUrl: fbImg }), headers: {'Content-Type': 'application/json'} 
-           });
-           if (!res.ok) fbRes = "[POST FALLIDO: RECHAZADO POR EL PUENTE]";
-         } catch(e) { fbRes = "[POST FALLIDO: ERROR DE RED AL CONECTAR CON MAKE.COM]"; }
-      } else {
-         fbRes = "[POST DENEGADO: VARIABLE DE ENTORNO FB_WEBHOOK_URL NO CONFIGURADA EN EL SERVIDOR VPS]";
-      }
+           const res = await fetch(webhookUrl, { method: 'POST', body: JSON.stringify({ message: fbMsg, imageUrl: fbImg }), headers: {'Content-Type': 'application/json'} });
+           if (!res.ok) fbRes = "[POST FALLIDO]";
+         } catch(e) { fbRes = "[ERROR DE RED]"; }
+      } else { fbRes = "[ERROR: URL NO CONFIGURADA]"; }
       
-      // Enviamos el resultado de la función de vuelta a Gemini para que termine su respuesta
-      result = await chat.sendMessage([{
-        functionResponse: { name: "publishToFacebook", response: { result: fbRes } }
-      }]);
+      result = await chat.sendMessage([{ functionResponse: { name: "publishToFacebook", response: { result: fbRes } } }]);
     }
   }
 
