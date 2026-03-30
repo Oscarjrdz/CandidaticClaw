@@ -160,12 +160,17 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
       const q = call.args.query;
       let searchRes = "[BÚSQUEDA FALLIDA]";
       try {
-        const resp = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        });
-        const html = await resp.text();
-        const snippets = [...html.matchAll(/<a class="result__snippet[^>]+>([\s\S]*?)<\/a>/g)].slice(0, 5).map(m => m[1].replace(/<[^>]+>/g, '')).join('\n— ');
-        searchRes = snippets.length > 10 ? `[RESULTADOS REALES DE BÚSQUEDA PARA "${q}"]\n— ${snippets}` : "[Cero resultados encontrados]";
+        const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=es-MX&gl=MX&ceid=MX:es-419`;
+        const resp = await fetch(url);
+        const xml = await resp.text();
+        const items = [...xml.matchAll(/<item>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<pubDate>(.*?)<\/pubDate>[\s\S]*?<\/item>/g)].slice(0, 10);
+        
+        if (items.length > 0) {
+           const newsList = items.map(m => `- ${m[1]} (${new Date(m[2]).toLocaleString('es-MX')})`).join('\n');
+           searchRes = `[NOTICIAS Y TITULARES REALES RECIENTES PARA "${q}"]\n\n${newsList}`;
+        } else {
+           searchRes = `[No hay noticias recientes de "${q}", usa otra combinación de palabras o diles que no hay datos nuevos.]`;
+        }
       } catch(e) { searchRes = "[Error de red buscando en internet]"; }
       
       result = await chat.sendMessage([{ functionResponse: { name: "searchWeb", response: { result: searchRes } } }]);
