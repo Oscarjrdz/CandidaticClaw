@@ -70,7 +70,8 @@ async function enrichWithBrowser(userMessage) {
     { regex: /infobae\.com/i, url: 'https://www.infobae.com/mexico' },
     { regex: /elfinanciero/i, url: 'https://www.elfinanciero.com.mx' },
     { regex: /eleconomista/i, url: 'https://www.eleconomista.com.mx' },
-    { regex: /elnorte|reforma/i, url: null }, // bloqueados, usar Google Search
+    { regex: /elnorte\.com|elnorte|el norte/i, url: 'https://www.elnorte.com' },
+    { regex: /reforma/i, url: 'https://www.reforma.com' }
   ];
   
   const hasBrowseIntent = /vis[ií]ta|ve a|navega|abre|entra a|dame.*not|noticias.*hoy/i.test(userMessage);
