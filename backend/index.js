@@ -112,12 +112,13 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
       functionDeclarations: [
         {
           name: "publishToFacebook",
-          description: "Publica texto en Facebook.",
+          description: "Publica texto en Facebook enviándolo a Make.com. Acepta programar posts a futuro si el usuario lo pide.",
           parameters: {
             type: "OBJECT",
             properties: {
               message: { type: "STRING" },
-              imageUrl: { type: "STRING", description: "Opcional. URL de foto." }
+              imageUrl: { type: "STRING", description: "Opcional. URL de foto." },
+              scheduleTime: { type: "STRING", description: "Opcional. Hora y fecha para publicar a futuro (ej: 'mañana a las 5:15 PM')." }
             },
             required: ["message"]
           }
@@ -179,11 +180,12 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
     else if (call.name === 'publishToFacebook') {
       const fbMsg = call.args.message;
       const fbImg = call.args.imageUrl;
-      let fbRes = "[POST ENVIADO A LA COLA EXITOSAMENTE]";
+      const scheduleTime = call.args.scheduleTime;
+      let fbRes = scheduleTime ? `[POST PROGRAMADO EXITOSAMENTE PARA: ${scheduleTime}]` : "[POST ENVIADO A LA COLA EXITOSAMENTE]";
       const webhookUrl = process.env.FB_WEBHOOK_URL;
       if (webhookUrl) {
          try {
-           const res = await fetch(webhookUrl, { method: 'POST', body: JSON.stringify({ message: fbMsg, imageUrl: fbImg }), headers: {'Content-Type': 'application/json'} });
+           const res = await fetch(webhookUrl, { method: 'POST', body: JSON.stringify({ message: fbMsg, imageUrl: fbImg, scheduleTime }), headers: {'Content-Type': 'application/json'} });
            if (!res.ok) fbRes = "[POST FALLIDO]";
          } catch(e) { fbRes = "[ERROR DE RED]"; }
       } else { fbRes = "[ERROR: URL NO CONFIGURADA]"; }
