@@ -103,6 +103,33 @@ async function enrichWithBrowser(userMessage) {
   }
 }
 
+// Genera una imagen usando Google Imagen 3 (Nano Banana)
+async function generateImageWithGemini(prompt) {
+  try {
+    console.log('[Imagen 3] Generando arte para:', prompt);
+    const apiKey = process.env.GOOGLE_API_KEY;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
+    const body = {
+      instances: [{ prompt: prompt }],
+      parameters: { sampleCount: 1, aspectRatio: "1:1", outputOptions: { mimeType: "image/jpeg" } }
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      console.error("[Imagen 3 Error HTTP]", res.status);
+      return null;
+    }
+    const data = await res.json();
+    return data.predictions?.[0]?.bytesBase64Encoded || null;
+  } catch (e) {
+    console.error("[Imagen 3 Exception]", e.message);
+    return null;
+  }
+}
+
 // Procesa un mensaje con Gemini (texto) y devuelve la respuesta
 async function processWithAgent(userMessage, sessionKey = 'default') {
   const apiKey = process.env.GOOGLE_API_KEY;
@@ -118,7 +145,8 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
             properties: {
               message: { type: "STRING" },
               imageUrl: { type: "STRING", description: "Opcional. URL de foto." },
-              scheduleTime: { type: "STRING", description: "Opcional. Fecha y hora EXACTA en formato estricto ISO 8601 (ej: '2026-03-31T17:15:00Z') calculada a partir de la hora actual. Indispensable para programaciones." }
+              scheduleTime: { type: "STRING", description: "Opcional. Fecha y hora EXACTA en formato estricto ISO 8601 (ej: '2026-03-31T17:15:00Z') calculada a partir de la hora actual. Indispensable para programaciones." },
+              imageGenerationPrompt: { type: "STRING", description: "Opcional. Si el usuario pide generar/clonar una foto o flyer, escribe aquí las instrucciones visuales súper detalladas en INGLÉS para que la IA (Imagen 3) dibuje la foto nueva (ej: 'A high quality product shot of a black nike shoe on a neon cyberpunk background')." }
             },
             required: ["message"]
           }
@@ -181,14 +209,32 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
       const fbMsg = call.args.message;
       const fbImg = call.args.imageUrl;
       const scheduleTime = call.args.scheduleTime;
+      const imageGenPrompt = call.args.imageGenerationPrompt;
       let fbRes = scheduleTime ? `[POST PROGRAMADO EXITOSAMENTE PARA: ${scheduleTime}]` : "[POST ENVIADO A LA COLA EXITOSAMENTE]";
       const webhookUrl = process.env.FB_WEBHOOK_URL;
+      
+      let imageBase64 = null;
+      if (imageGenPrompt) {
+         fbRes = "[GENERANDO ARTE Y POSTEANDO...]";
+         imageBase64 = await generateImageWithGemini(imageGenPrompt);
+         if (imageBase64) {
+            fbRes = scheduleTime ? `[ARTE GENERADO + POST PROGRAMADO PARA: ${scheduleTime}]` : "[ARTE GENERADO Y POSTEADO EXITOSAMENTE]";
+         } else {
+            fbRes = "[ERROR AL GENERAR EL ARTE CON IMAGEN 3, PUBLICANDO SIN IMAGEN NUEVA]";
+         }
+      }
+
       if (webhookUrl) {
          try {
-           const res = await fetch(webhookUrl, { method: 'POST', body: JSON.stringify({ message: fbMsg, imageUrl: fbImg, scheduleTime }), headers: {'Content-Type': 'application/json'} });
-           if (!res.ok) fbRes = "[POST FALLIDO]";
-         } catch(e) { fbRes = "[ERROR DE RED]"; }
-      } else { fbRes = "[ERROR: URL NO CONFIGURADA]"; }
+           const payload = { message: fbMsg, imageUrl: fbImg, scheduleTime, imageBase64 };
+           const fetchOpts = { method: 'POST', body: JSON.stringify(payload), headers: {'Content-Type': 'application/json'} };
+           const res = await fetch(webhookUrl, fetchOpts);
+           if (!res.ok) {
+             console.error("[Make.com Webhook HTTP Error]", res.status, await res.text());
+             fbRes = "[POST FALLIDO EN MAKE.COM]";
+           }
+         } catch(e) { fbRes = "[ERROR DE RED EN MAKE.COM]"; }
+      } else { fbRes = "[ERROR: URL DE MAKE NO CONFIGURADA]"; }
       
       result = await chat.sendMessage([{ functionResponse: { name: "publishToFacebook", response: { result: fbRes } } }]);
     }
