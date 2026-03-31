@@ -128,8 +128,8 @@ async function generateImageWithGemini(prompt) {
   }
 }
 
-// Procesa un mensaje con Gemini (texto) y devuelve la respuesta
-async function processWithAgent(userMessage, sessionKey = 'default') {
+// Procesa un mensaje con Gemini (texto/imagen) y devuelve la respuesta
+async function processWithAgent(userMessage, sessionKey = 'default', imagePart = null) {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_API_KEY no configurada');
 
@@ -178,7 +178,12 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
   const webContext = await enrichWithBrowser(userMessage).catch(() => null);
   const finalMessage = webContext ? `${webContext}\n\nPregunta: ${userMessage}` : userMessage;
 
-  let result = await chat.sendMessage(finalMessage);
+  let msgPayload = finalMessage;
+  if (imagePart) {
+      msgPayload = [ { text: finalMessage }, imagePart ];
+  }
+
+  let result = await chat.sendMessage(msgPayload);
   
   const functionCalls = result.response.functionCalls();
   if (functionCalls && functionCalls.length > 0) {
@@ -218,7 +223,7 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
          if (imageBase64) {
             fbRes = scheduleTime ? `[ARTE GENERADO + POST PROGRAMADO PARA: ${scheduleTime}]` : "[ARTE GENERADO Y POSTEADO EXITOSAMENTE]";
          } else {
-            fbRes = "[ERROR AL GENERAR EL ARTE CON IMAGEN 3, PUBLICANDO SIN IMAGEN NUEVA]";
+            fbRes = "[ERROR AL GENERAR EL ARTE CON POLLINATIONS, PUBLICANDO SIN IMAGEN NUEVA]";
          }
       }
 
@@ -240,7 +245,7 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
 
   const reply = result.response.text();
 
-  history.push({ role: 'user',  parts: [{ text: userMessage }] });
+  history.push({ role: 'user',  parts: imagePart ? [{ text: userMessage }, imagePart] : [{ text: userMessage }] });
   history.push({ role: 'model', parts: [{ text: reply }] });
   if (history.length > 40) history.splice(0, history.length - 40);
 
@@ -248,34 +253,11 @@ async function processWithAgent(userMessage, sessionKey = 'default') {
   return reply;
 }
 
-// Procesa imagen + texto con Gemini Vision
+// Procesa imagen + texto con Gemini Vision (Redireccionando a la red principal)
 async function processWithAgentVision(imageBase64, mimeType, caption, sessionKey = 'default') {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_API_KEY no configurada');
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-    systemInstruction: getSystemPrompt(),
-  });
-
-  const prompt = caption || '¿Qué ves en esta imagen? Analízala y descríbela detalladamente en español.';
-
-  const result = await model.generateContent([
-    { inlineData: { data: imageBase64, mimeType } },
-    { text: prompt },
-  ]);
-  const reply = result.response.text();
-
-  // Agregar al historial de sesión como si fuera una conversación normal
-  if (!chatSessions.has(sessionKey)) chatSessions.set(sessionKey, []);
-  const history = chatSessions.get(sessionKey);
-  history.push({ role: 'user',  parts: [{ text: `[Imagen enviada] ${prompt}` }] });
-  history.push({ role: 'model', parts: [{ text: reply }] });
-  if (history.length > 40) history.splice(0, history.length - 40);
-
-  stats.messagesToday++;
-  return reply;
+  const prompt = caption || 'Analiza detalladamente esta imagen en español e identifica todos los elementos visuales que la componen para clonarla o inspirarnos en ella.';
+  const imagePart = { inlineData: { data: imageBase64, mimeType } };
+  return await processWithAgent(prompt, sessionKey, imagePart);
 }
 
 // Divide texto largo en chunks (Telegram max 4096, WhatsApp ~65536)
