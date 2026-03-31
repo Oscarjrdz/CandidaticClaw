@@ -144,6 +144,7 @@ async function processWithAgent(userMessage, sessionKey = 'default', imagePart =
             properties: {
               message: { type: "STRING" },
               imageUrl: { type: "STRING", description: "Opcional. URL de foto." },
+              articleUrl: { type: "STRING", description: "Opcional. URL de una nota, blog o sitio destino. Si se proporciona, esta URL aparecerá en rojo/azul y generará la tarjeta de previsualización (Link Post) en Facebook." },
               scheduleTime: { type: "STRING", description: "Opcional. Fecha y hora EXACTA en formato estricto ISO 8601 (ej: '2026-03-31T17:15:00Z') calculada a partir de la hora actual. Indispensable para programaciones." },
               imageGenerationPrompt: { type: "STRING", description: "Opcional. Si el usuario pide generar/clonar una foto o flyer, escribe aquí las instrucciones visuales súper detalladas en INGLÉS para que la IA (Imagen 3) dibuje la foto nueva (ej: 'A high quality product shot of a black nike shoe on a neon cyberpunk background')." }
             },
@@ -213,6 +214,7 @@ async function processWithAgent(userMessage, sessionKey = 'default', imagePart =
       const fbMsg = call.args.message;
       const fbImg = call.args.imageUrl;
       const scheduleTime = call.args.scheduleTime;
+      const articleUrl = call.args.articleUrl;
       const imageGenPrompt = call.args.imageGenerationPrompt;
       let fbRes = scheduleTime ? `[POST PROGRAMADO EXITOSAMENTE PARA: ${scheduleTime}]` : "[POST ENVIADO A LA COLA EXITOSAMENTE]";
       const webhookUrl = process.env.FB_WEBHOOK_URL;
@@ -230,7 +232,7 @@ async function processWithAgent(userMessage, sessionKey = 'default', imagePart =
 
       if (webhookUrl) {
          try {
-           const payload = { message: fbMsg, imageUrl: fbImg, scheduleTime, imageBase64 };
+           const payload = { message: fbMsg, imageUrl: fbImg, scheduleTime, articleUrl, imageBase64 };
            const fetchOpts = { method: 'POST', body: JSON.stringify(payload), headers: {'Content-Type': 'application/json'} };
            const res = await fetch(webhookUrl, fetchOpts);
            if (!res.ok) {
