@@ -103,29 +103,27 @@ async function enrichWithBrowser(userMessage) {
   }
 }
 
-// Genera una imagen usando Google Imagen 3 (Nano Banana)
+// Genera una imagen usando motor alternativo libre (Pollinations AI) ante el bloqueo de Google
 async function generateImageWithGemini(prompt) {
   try {
-    console.log('[Imagen 3] Generando arte para:', prompt);
-    const apiKey = process.env.GOOGLE_API_KEY;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
-    const body = {
-      instances: [{ prompt: prompt }],
-      parameters: { sampleCount: 1, aspectRatio: "1:1" }
-    };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
+    console.log('[Motor Imagen] Generando arte para:', prompt);
+    // Usamos pollinations.ai, un motor estable sin bloqueo regional ni costo
+    const safePrompt = encodeURIComponent(prompt);
+    const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=1080&height=1080&nologo=true`;
+    
+    console.log('[Motor Imagen] Consultando:', url);
+    const res = await fetch(url);
     if (!res.ok) {
-      console.error("[Imagen 3 Error HTTP]", res.status, await res.text());
+      console.error("[Motor Imagen Error HTTP]", res.status);
       return null;
     }
-    const data = await res.json();
-    return data.predictions?.[0]?.bytesBase64Encoded || null;
+    
+    // Convertir el buffer de la imagen directamente a Base64 para enviarlo a Make.com
+    const arrayBuffer = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return buffer.toString('base64');
   } catch (e) {
-    console.error("[Imagen 3 Exception]", e.message);
+    console.error("[Motor Imagen Exception]", e.message);
     return null;
   }
 }
