@@ -111,7 +111,7 @@ async function generateImageWithGemini(prompt) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
     const body = {
       instances: [{ prompt: prompt }],
-      parameters: { sampleCount: 1, aspectRatio: "1:1", outputOptions: { mimeType: "image/jpeg" } }
+      parameters: { sampleCount: 1, aspectRatio: "1:1" }
     };
     const res = await fetch(url, {
       method: 'POST',
@@ -119,7 +119,7 @@ async function generateImageWithGemini(prompt) {
       body: JSON.stringify(body)
     });
     if (!res.ok) {
-      console.error("[Imagen 3 Error HTTP]", res.status);
+      console.error("[Imagen 3 Error HTTP]", res.status, await res.text());
       return null;
     }
     const data = await res.json();
