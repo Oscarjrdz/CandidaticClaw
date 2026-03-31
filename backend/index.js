@@ -108,7 +108,7 @@ async function generateImageWithGemini(prompt) {
   try {
     console.log('[Imagen 3] Generando arte para:', prompt);
     const apiKey = process.env.GOOGLE_API_KEY;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
     const body = {
       instances: [{ prompt: prompt }],
       parameters: { sampleCount: 1, aspectRatio: "1:1", outputOptions: { mimeType: "image/jpeg" } }
