@@ -254,6 +254,38 @@ export async function publishViaPuppeteer({ message }) {
       return "[ERROR UI] No pude detectar el cuadro de texto del post (tardó mucho en cargar).";
     }
 
+    // === PASO EXTRA: Forzar privacidad a Público (si existe selector) ===
+    await fbPage.evaluate(async () => {
+      const sleep = ms => new Promise(res => setTimeout(res, ms));
+      try {
+        const buttons = Array.from(document.querySelectorAll('div[role="button"]'));
+        const privacyBtn = buttons.find(b => {
+            const txt = b.innerText || '';
+            const rect = b.getBoundingClientRect();
+            // Evitamos dar click en cosas muy grandes, los botones de privacidad son pequeños
+            return (txt === 'Amigos' || txt === 'Solo yo' || txt === 'Público' || txt === 'Friends' || txt === 'Only me' || txt === 'Public') && rect.height > 0 && rect.width < 250;
+        });
+
+        if (privacyBtn && privacyBtn.innerText !== 'Público' && privacyBtn.innerText !== 'Public') {
+            console.log("Cambiando privacidad...");
+            privacyBtn.click();
+            await sleep(2000); // Esperar animación del modal
+            
+            const radios = Array.from(document.querySelectorAll('div[role="radio"]'));
+            const publicRadio = radios.find(r => r.innerText.includes('Público') || r.innerText.includes('Public'));
+            if (publicRadio) {
+                publicRadio.click();
+                await sleep(1000);
+            }
+            
+            const saveBtns = Array.from(document.querySelectorAll('div[aria-label="Guardar"], div[aria-label="Save"], div[aria-label="Listo"], div[aria-label="Done"], div[role="button"]'));
+            const saveBtn = saveBtns.find(b => b.innerText === 'Guardar' || b.innerText === 'Save' || b.innerText === 'Listo' || b.innerText === 'Done');
+            if (saveBtn) saveBtn.click();
+            await sleep(1500); // Esperar que cierre el modal
+        }
+      } catch(e) {}
+    });
+
     // Escribir caracter por caracter como humano
     await randomDelay(500, 1000);
     await humanType(fbPage, null, message);
@@ -479,6 +511,36 @@ export async function publishToGroups(groupIds, message) {
          resultados.push(`❌ Grupo ${groupId}: Modal no cargó.`);
          continue;
       }
+
+      // PASO EXTRA: Forzar privacidad a Público si se detecta selector (algunos grupos de compraventa lo tienen)
+      await fbPage.evaluate(async () => {
+        const sleep = ms => new Promise(res => setTimeout(res, ms));
+        try {
+          const buttons = Array.from(document.querySelectorAll('div[role="button"]'));
+          const privacyBtn = buttons.find(b => {
+              const txt = b.innerText || '';
+              const rect = b.getBoundingClientRect();
+              return (txt === 'Amigos' || txt === 'Solo yo' || txt === 'Público' || txt === 'Friends' || txt === 'Only me' || txt === 'Public') && rect.height > 0 && rect.width < 250;
+          });
+
+          if (privacyBtn && privacyBtn.innerText !== 'Público' && privacyBtn.innerText !== 'Public') {
+              privacyBtn.click();
+              await sleep(2000);
+              
+              const radios = Array.from(document.querySelectorAll('div[role="radio"]'));
+              const publicRadio = radios.find(r => r.innerText.includes('Público') || r.innerText.includes('Public'));
+              if (publicRadio) {
+                  publicRadio.click();
+                  await sleep(1000);
+              }
+              
+              const saveBtns = Array.from(document.querySelectorAll('div[aria-label="Guardar"], div[aria-label="Save"], div[aria-label="Listo"], div[aria-label="Done"], div[role="button"]'));
+              const saveBtn = saveBtns.find(b => b.innerText === 'Guardar' || b.innerText === 'Save' || b.innerText === 'Listo' || b.innerText === 'Done');
+              if (saveBtn) saveBtn.click();
+              await sleep(1500);
+          }
+        } catch(e) {}
+      });
 
       // Reusar humanType
       for (const char of message) {
