@@ -4,6 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { publishViaPuppeteer } from './facebook-automator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,7 +139,7 @@ async function processWithAgent(userMessage, sessionKey = 'default', imagePart =
       functionDeclarations: [
         {
           name: "publishToFacebook",
-          description: "Publica texto en Facebook enviándolo a Make.com. Acepta programar posts a futuro si el usuario lo pide.",
+          description: "Publica texto en la página de Facebook directamente usando automatización nativa (Puppeteer) en el servidor. (Nota: actualmente solo soporta texto).",
           parameters: {
             type: "OBJECT",
             properties: {
@@ -212,35 +213,16 @@ async function processWithAgent(userMessage, sessionKey = 'default', imagePart =
     }
     else if (call.name === 'publishToFacebook') {
       const fbMsg = call.args.message;
-      const fbImg = call.args.imageUrl;
-      const scheduleTime = call.args.scheduleTime;
-      const articleUrl = call.args.articleUrl;
-      const imageGenPrompt = call.args.imageGenerationPrompt;
-      let fbRes = scheduleTime ? `[POST PROGRAMADO EXITOSAMENTE PARA: ${scheduleTime}]` : "[POST ENVIADO A LA COLA EXITOSAMENTE]";
-      const webhookUrl = process.env.FB_WEBHOOK_URL;
+      let fbRes = "[INICIANDO POSTEO NATIVO...]";
       
-      let imageBase64 = null;
-      if (imageGenPrompt) {
-         fbRes = "[GENERANDO ARTE Y POSTEANDO...]";
-         imageBase64 = await generateImageWithGemini(imageGenPrompt);
-         if (imageBase64) {
-            fbRes = scheduleTime ? `[ARTE GENERADO + POST PROGRAMADO PARA: ${scheduleTime}]` : "[ARTE GENERADO Y POSTEADO EXITOSAMENTE]";
-         } else {
-            fbRes = "[ERROR AL GENERAR EL ARTE CON POLLINATIONS, PUBLICANDO SIN IMAGEN NUEVA]";
-         }
+      try {
+        console.log(`[Facebook] Agente solicitó publicar: ${fbMsg}`);
+        // Llamada directa a nuestro script nativo
+        const resultAutomator = await publishViaPuppeteer(fbMsg);
+        fbRes = resultAutomator; // "[POST PUBLICADO EXITOSAMENTE]" o el error respectivo
+      } catch(e) { 
+        fbRes = `[ERROR FATAL PUBLICANDO: ${e.message}]`; 
       }
-
-      if (webhookUrl) {
-         try {
-           const payload = { message: fbMsg, imageUrl: fbImg, scheduleTime, articleUrl, imageBase64 };
-           const fetchOpts = { method: 'POST', body: JSON.stringify(payload), headers: {'Content-Type': 'application/json'} };
-           const res = await fetch(webhookUrl, fetchOpts);
-           if (!res.ok) {
-             console.error("[Make.com Webhook HTTP Error]", res.status, await res.text());
-             fbRes = "[POST FALLIDO EN MAKE.COM]";
-           }
-         } catch(e) { fbRes = "[ERROR DE RED EN MAKE.COM]"; }
-      } else { fbRes = "[ERROR: URL DE MAKE NO CONFIGURADA]"; }
       
       result = await chat.sendMessage([{ functionResponse: { name: "publishToFacebook", response: { result: fbRes } } }]);
     }
