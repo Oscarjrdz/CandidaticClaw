@@ -283,7 +283,18 @@ export async function publishViaPuppeteer({ message }) {
             if (saveBtn) saveBtn.click();
             await sleep(1500); // Esperar que cierre el modal
         }
-      } catch(e) {}
+    } catch(e) {}
+    });
+
+    // Reenfocar obligatoriamente el cuadro de texto tras cualquier cambio de modal de privacidad
+    await randomDelay(1000, 2000);
+    await fbPage.evaluate(() => {
+      const textboxes = document.querySelectorAll('div[role="textbox"][contenteditable="true"]');
+      for (let tb of textboxes) {
+        if (tb.offsetHeight > 0 || tb.getClientRects().length > 0) {
+          tb.focus();
+        }
+      }
     });
 
     // Escribir caracter por caracter como humano
@@ -546,6 +557,17 @@ export async function publishToGroups(groupIds, message) {
               await sleep(1500);
           }
         } catch(e) {}
+      });
+
+      // Reenfocar obligatoriamente el cuadro de texto tras cualquier cambio de modal de privacidad
+      await randomDelay(1000, 2000);
+      await fbPage.evaluate(() => {
+        const textboxes = document.querySelectorAll('div[role="textbox"][contenteditable="true"]');
+        for (let tb of textboxes) {
+          if (tb.offsetHeight > 0 || tb.getClientRects().length > 0) {
+            tb.focus();
+          }
+        }
       });
 
       // Reusar humanType
