@@ -289,10 +289,16 @@ export async function publishViaPuppeteer({ message }) {
     // Escribir caracter por caracter como humano
     await randomDelay(500, 1000);
     await humanType(fbPage, null, message);
-    console.log('[Facebook Automator] Texto escrito. Esperando antes de publicar...');
-
-    // Pausa humana después de escribir (como si releyeras)
-    await randomDelay(2000, 4000);
+    
+    if (message.includes('http')) {
+       console.log(`[Facebook Automator] Link detectado. Esperando 8 segundos para que cargue la tarjeta de metadatos...`);
+       await new Promise(r => setTimeout(r, 8000));
+       await fbPage.keyboard.type(' ');
+       await randomDelay(1000, 2000);
+    } else {
+       console.log('[Facebook Automator] Texto escrito. Esperando antes de publicar...');
+       await randomDelay(2000, 4000);
+    }
 
     try {
       const postClicked = await fbPage.evaluate(async () => {
