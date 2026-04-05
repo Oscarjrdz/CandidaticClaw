@@ -228,8 +228,14 @@ export async function publishViaPuppeteer({ message }) {
       return "[ERROR UI] No pude encontrar el botón de publicación. ¿La página cargó bien?";
     }
 
-    // Esperar que el modal abra con delay humano
+    // Esperar que el modal abra con delay humano o hasta que aparezca explícitamente
     await randomDelay(2000, 3500);
+    try {
+      await fbPage.waitForSelector('div[role="textbox"][contenteditable="true"]', { visible: true, timeout: 15000 });
+    } catch(e) {
+      console.log('[Facebook Automator] ⚠️ El popup de texto tardó más de 15s en aparecer o no cargó.');
+    }
+    
     await humanMouseMove(fbPage);
 
     // === PASO 2: Encontrar el textbox y escribir gradualmente ===
@@ -245,7 +251,7 @@ export async function publishViaPuppeteer({ message }) {
     });
 
     if (!textboxFound) {
-      return "[ERROR UI] No pude detectar el cuadro de texto del post.";
+      return "[ERROR UI] No pude detectar el cuadro de texto del post (tardó mucho en cargar).";
     }
 
     // Escribir caracter por caracter como humano
@@ -312,5 +318,386 @@ export async function publishViaPuppeteer({ message }) {
     } else if (browser) {
       browser.disconnect();
     }
+  }
+}
+
+/**
+ * Navega a facebook y extrae la lista de grupos a los que estás unido.
+ */
+export async function getFacebookGroups() {
+  let browser;
+  let shouldClose = false;
+
+  console.log('[Facebook Automator] Extrayendo grupos...');
+  browser = await puppeteerExtra.launch({
+    headless: true,
+    executablePath: CHROMIUM_PATH,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--js-flags="--max-old-space-size=256"',
+      '--disable-accelerated-2d-canvas'
+    ]
+  });
+  shouldClose = true;
+
+  try {
+    const fbPage = await browser.newPage();
+    
+    // Inyección de cookies
+    if (existsSync('/root/CandidaticClaw/backend/fb-cookies.json')) {
+      const cookiesStr = fs.readFileSync('/root/CandidaticClaw/backend/fb-cookies.json', 'utf8');
+      await fbPage.setCookie(...JSON.parse(cookiesStr));
+    } else {
+      throw new Error("Cookies no encontradas en el servidor.");
+    }
+
+    await fbPage.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+
+    console.log('[Facebook Automator] Navegando a facebook.com/groups/joins/ ...');
+    await fbPage.goto('https://www.facebook.com/groups/joins/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    
+    await fbPage.waitForSelector('a[href*="/groups/"]', { visible: true, timeout: 15000 }).catch(() => null);
+    await randomDelay(2000, 3000);
+
+    // Bucle de auto-scrolling para cargar LOS 243+ GRUPOS (Infinite Scroll de Facebook)
+    console.log('[Facebook Automator] Haciendo auto-scroll para cargar todos los grupos...');
+    let previousHeight = await fbPage.evaluate('document.body.scrollHeight');
+    let scrollAttempts = 0;
+    while (scrollAttempts < 15) { // Límite de seguridad
+      await fbPage.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+      await new Promise(r => setTimeout(r, 1500)); // Esperar a que Facebook cargue más red
+      
+      let newHeight = await fbPage.evaluate('document.body.scrollHeight');
+      if (newHeight === previousHeight) {
+         // Intento extra por si hay lag cargando
+         await new Promise(r => setTimeout(r, 2000));
+         newHeight = await fbPage.evaluate('document.body.scrollHeight');
+         if (newHeight === previousHeight) break; // Llegamos al final de todos los grupos
+      }
+      previousHeight = newHeight;
+      scrollAttempts++;
+    }
+
+    const grupos = await fbPage.evaluate(() => {
+      const links = document.querySelectorAll('a[href*="/groups/"]');
+      const results = [];
+      const idSet = new Set();
+      
+      links.forEach(a => {
+        const url = a.href;
+        let nombre = a.innerText.trim();
+        if (!nombre) nombre = a.getAttribute('aria-label') || '';
+        
+        if (nombre && url) {
+           if (nombre.toLowerCase().includes('crear') || nombre.toLowerCase().includes('descubrir') || nombre.toLowerCase().includes('grupos')) return;
+           
+           let groupId = null;
+           const parts = url.split('/groups/');
+           if (parts.length > 1) {
+              groupId = parts[1].split('/')[0].split('?')[0]; 
+           }
+           
+           if (groupId && !idSet.has(groupId) && groupId !== 'joins' && groupId !== 'create') {
+              idSet.add(groupId);
+              const nombreLimpio = nombre.split('\\n')[0].trim();
+              results.push({ id: groupId, name: nombreLimpio, url: `https://www.facebook.com/groups/${groupId}` });
+           }
+        }
+      });
+      return results;
+    });
+
+    console.log(`[Facebook Automator] ✅ Extracción completada: ${grupos.length} grupos.`);
+    return grupos;
+
+  } catch (error) {
+    console.error('[Facebook Automator] Error extrayendo grupos:', error.message);
+    throw error;
+  } finally {
+    if (shouldClose && browser) await browser.close();
+  }
+}
+
+/**
+ * Publica un mensaje secuencialmente en varios grupos
+ */
+export async function publishToGroups(groupIds, message) {
+  let browser;
+  try {
+    console.log('[Facebook Automator] Modo Servidor — lanzando Chromium para GRUPOS...');
+    browser = await puppeteerExtra.launch({
+      headless: true,
+      executablePath: CHROMIUM_PATH,
+      args: [
+        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+        '--disable-gpu', '--js-flags="--max-old-space-size=256"'
+      ]
+    });
+
+    const fbPage = await browser.newPage();
+    if (existsSync('/root/CandidaticClaw/backend/fb-cookies.json')) {
+      const cookiesStr = fs.readFileSync('/root/CandidaticClaw/backend/fb-cookies.json', 'utf8');
+      await fbPage.setCookie(...JSON.parse(cookiesStr));
+    } else {
+      throw new Error("Cookies no encontradas en el servidor.");
+    }
+    await fbPage.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+
+    const resultados = [];
+    for (let groupId of groupIds) {
+      console.log(`[Grupos] Navegando al grupo ${groupId}...`);
+      await fbPage.goto(`https://www.facebook.com/groups/${groupId}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await randomDelay(3000, 5000);
+
+      const composerFound = await fbPage.evaluate(() => {
+        const triggers = Array.from(document.querySelectorAll('div[role="button"]'))
+           .filter(el => el.innerText.includes('Escribe algo') || el.innerText.includes('Write something'));
+        if (triggers.length > 0) { triggers[0].click(); return true; }
+        return false;
+      });
+
+      if (!composerFound) {
+        resultados.push(`❌ Grupo ${groupId}: Botón 'Escribe algo' NO encontrado.`);
+        continue;
+      }
+
+      await fbPage.waitForSelector('div[role="textbox"][contenteditable="true"]', { visible: true, timeout: 8000 }).catch(()=>null);
+      await randomDelay(1000, 2000);
+
+      const textboxFound = await fbPage.evaluate(() => {
+        const tbs = document.querySelectorAll('div[role="textbox"][contenteditable="true"]');
+        for (let tb of tbs) {
+          if (tb.offsetHeight > 0 || tb.getClientRects().length > 0) { tb.focus(); return true; }
+        }
+        return false;
+      });
+
+      if (!textboxFound) {
+         resultados.push(`❌ Grupo ${groupId}: Modal no cargó.`);
+         continue;
+      }
+
+      // Reusar humanType
+      for (const char of message) {
+        await fbPage.keyboard.type(char, { delay: randomInt(30, 100) });
+        if (Math.random() < 0.05) await randomDelay(300, 600);
+      }
+      await randomDelay(1000, 2000);
+
+      const btnClicked = await fbPage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('div[aria-label="Publicar"], div[aria-label="Post"]'));
+        const btn = btns.find(b => b.getAttribute('aria-disabled') !== 'true');
+        if (btn) { btn.click(); return true; }
+        return false;
+      });
+
+      if (btnClicked) {
+        resultados.push(`✅ Grupo ${groupId}: POST PUBLICADO.`);
+        await new Promise(r => setTimeout(r, 8000)); // Esperar a que la página se autorefresque
+      } else {
+        resultados.push(`❌ Grupo ${groupId}: Botón Publicar deshabilitado.`);
+      }
+    }
+    return resultados.join('\\n');
+  } catch (error) {
+    console.error('[Automator] Error publicando en grupos:', error.message);
+    throw error;
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
+/**
+ * Lee los últimos posts del Timeline (Perfil Personal o Feed de Inicio)
+ */
+export async function getProfileFeed(limit = 5) {
+  let browser;
+  try {
+    console.log('[Facebook Automator] Extrayendo feed del perfil...');
+    browser = await puppeteerExtra.launch({
+      executablePath: CHROMIUM_PATH,
+      headless: 'new',
+      userDataDir: IS_SERVER ? CHROME_PROFILE_PATH : undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800']
+    });
+
+    const page = await browser.newPage();
+    
+    if (IS_SERVER) {
+      if (existsSync('/root/CandidaticClaw/backend/fb-cookies.json')) {
+        const cookies = JSON.parse(fs.readFileSync('/root/CandidaticClaw/backend/fb-cookies.json', 'utf8'));
+        await page.setCookie(...cookies);
+      }
+    }
+
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    await page.goto('https://www.facebook.com/me', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    
+    // Scrollear para cargar artículos
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    const posts = await page.evaluate((maxPosts) => {
+      const results = [];
+      const divFeed = document.querySelectorAll('div[role="article"], div.x1yztbdb.x1n2onr6.xh8yej3.x1ja2u2z');
+      const articles = Array.from(divFeed);
+      
+      for (const article of articles) {
+        if (results.length >= maxPosts) break;
+        const rawText = article.innerText;
+        // Filtrar basura
+        if (rawText && rawText.length > 20 && !rawText.includes('Escribe algo') && !rawText.includes('on your mind')) {
+          // Limpiar el texto dividiendolo por lineas, removiendo basura
+          const lines = rawText.split('\\n').filter(l => l.length > 2 && l.trim() !== 'Facebook');
+          
+          let author = lines[0];
+          let dateStr = lines[1] && typeof lines[1] === 'string' ? lines[1] : '';
+          
+          // El texto del post suele ser todo hasta que llega a botones como Me gusta o comentarios
+          const contentLines = [];
+          let metricsStr = "";
+          for (let i = 2; i < lines.length; i++) {
+            if (lines[i] === 'Me gusta' || lines[i] === 'Comentar' || lines[i] === 'Compartir') {
+                continue;
+            }
+            if (lines[i] === 'Escribe un comentario…') {
+                break;
+            }
+            if (lines[i].includes('comentarios') || lines[i].includes('veces compartido')) {
+                metricsStr += lines[i] + ' ';
+                continue;
+            }
+            contentLines.push(lines[i]);
+          }
+
+          results.push({
+            author,
+            context: dateStr,
+            content: contentLines.join('\\n'),
+            metrics: metricsStr.trim()
+          });
+        }
+      }
+      return results;
+    }, limit);
+
+    return posts;
+  } catch (error) {
+    console.error('[Automator] Error extrayendo feed:', error.message);
+    throw error;
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
+/**
+ * Lee las notificaciones de la cuenta para seguimiento de grupos.
+ */
+export async function getFacebookNotifications(limit = 10) {
+  let browser;
+  try {
+    console.log('[Facebook Automator] Leyendo Notificaciones...');
+    browser = await puppeteerExtra.launch({
+      executablePath: CHROMIUM_PATH,
+      headless: 'new',
+      userDataDir: IS_SERVER ? CHROME_PROFILE_PATH : undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    const page = await browser.newPage();
+    if (IS_SERVER && existsSync('/root/CandidaticClaw/backend/fb-cookies.json')) {
+      const cookies = JSON.parse(fs.readFileSync('/root/CandidaticClaw/backend/fb-cookies.json', 'utf8'));
+      await page.setCookie(...cookies);
+    }
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    
+    // Visitamos el home y abrimos el dropdown de notificaciones
+    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await randomDelay(3000, 5000);
+    
+    // Intentar buscar el botón de la campanita
+    await page.evaluate(() => {
+        const bell = document.querySelector('div[aria-label="Notificaciones"], div[aria-label="Notifications"], a[aria-label="Notificaciones"]');
+        if (bell) bell.click();
+    });
+    await randomDelay(3000, 5000);
+    
+    const notifs = await page.evaluate((max) => {
+        const results = [];
+        // Extraemos textos de enlaces visibles en el layout que contengan palabras clave
+        const links = Array.from(document.querySelectorAll('a'));
+        for (let a of links) {
+            const rawText = a.innerText.replace(/\\n/g, ' ').trim();
+            if (rawText.length > 15 && (
+                rawText.toLowerCase().includes('comentó') || 
+                rawText.toLowerCase().includes('reaccionó') || 
+                rawText.toLowerCase().includes('publicación') || 
+                rawText.toLowerCase().includes('grupo')
+            )) {
+                results.push({ text: rawText, link: a.href });
+            }
+        }
+        return results.slice(0, max);
+    }, limit);
+
+    return notifs;
+  } catch (error) {
+    console.error('[Automator] Error en notificaciones:', error.message);
+    throw error;
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
+/**
+ * Lee el Registro de Actividad para ver exactamente dónde se publicó exitosamente.
+ */
+export async function getFacebookActivityLog(limit = 10) {
+  let browser;
+  try {
+    console.log('[Facebook Automator] Leyendo Registro de Actividad...');
+    browser = await puppeteerExtra.launch({
+      executablePath: CHROMIUM_PATH,
+      headless: 'new',
+      userDataDir: IS_SERVER ? CHROME_PROFILE_PATH : undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    const page = await browser.newPage();
+    if (IS_SERVER && existsSync('/root/CandidaticClaw/backend/fb-cookies.json')) {
+      const cookies = JSON.parse(fs.readFileSync('/root/CandidaticClaw/backend/fb-cookies.json', 'utf8'));
+      await page.setCookie(...cookies);
+    }
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    
+    await page.goto('https://www.facebook.com/me/allactivity', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await randomDelay(4000, 6000);
+    
+    await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+    await randomDelay(2000, 3000);
+
+    const activity = await page.evaluate((max) => {
+        const results = [];
+        const items = Array.from(document.querySelectorAll('div[role="article"], div[role="row"]'));
+        for (let item of items) {
+           const rawText = item.innerText.replace(/\\n/g, ' | ').trim();
+           if (rawText.length > 20 && !rawText.includes('Registro de actividad')) {
+               results.push({ content: rawText });
+           }
+        }
+        return results.slice(0, max);
+    }, limit);
+
+    return activity;
+  } catch (error) {
+    console.error('[Automator] Error en Registro de Actividad:', error.message);
+    throw error;
+  } finally {
+    if (browser) await browser.close();
   }
 }

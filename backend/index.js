@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { publishViaPuppeteer } from './facebook-automator.js';
+import { publishViaPuppeteer, getFacebookGroups, publishToGroups, getProfileFeed, getFacebookNotifications, getFacebookActivityLog } from './facebook-automator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -162,6 +162,53 @@ async function processWithAgent(userMessage, sessionKey = 'default', imagePart =
             },
             required: ["query"]
           }
+        },
+        {
+          name: "listFacebookGroups",
+          description: "Navega a facebook.com y extrae en vivo la lista real de todos los grupos a los que la cuenta está unida. Úsalo si el usuario quiere 'saber, listar, ver o analizar' en qué grupos está.",
+          parameters: { type: "OBJECT", properties: {} }
+        },
+        {
+          name: "publishInFacebookGroups",
+          description: "Publica un texto específico en uno o más grupos de Facebook. Requiere los IDs de los grupos (que puedes obtener listando los grupos primero).",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              groupIds: { type: "ARRAY", items: { type: "STRING" }, description: "Arreglo con los IDs numéricos de los grupos objetivo." },
+              message: { type: "STRING", description: "El texto exacto de la publicación." }
+            },
+            required: ["groupIds", "message"]
+          }
+        },
+        {
+          name: "readFacebookFeed",
+          description: "Entra a tu propio perfil de Facebook (Timeline/Dashboard) de manera nativa y lee los últimos posts para ver métricas de interacciones (Likes, Comentarios, Compartidas) y el texto. Úsalo cuando te pidan 'ver nuestro feed' o revisar cómo van las publicaciones recientes.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              limit: { type: "INTEGER", description: "Cantidad de publicaciones a raspar (ej: 5)." }
+            }
+          }
+        },
+        {
+          name: "readFacebookNotifications",
+          description: "Entra a Facebook y extrae tus notificaciones más recientes (comentarios, likes, aprobaciones de grupos). Úsalo para dar seguimiento ultra recuente.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              limit: { type: "INTEGER", description: "Cantidad máxima de notificaciones a leer (recomendado: 10)." }
+            }
+          }
+        },
+        {
+          name: "readFacebookActivityLog",
+          description: "Abre el Registro de Actividad de tu perfil para investigar si las publicaciones recientes pasaron los filtros administrativos (verificar que se compartieron enlaces en grupos con éxito). Da un audit trail.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              limit: { type: "INTEGER", description: "Cantidad máxima de entradas del log (recomendado: 10)." }
+            }
+          }
         }
       ]
   }];
@@ -217,14 +264,78 @@ async function processWithAgent(userMessage, sessionKey = 'default', imagePart =
       
       try {
         console.log(`[Facebook] Agente solicitó publicar: ${fbMsg}`);
-        // Llamada directa a nuestro script nativo
-        const resultAutomator = await publishViaPuppeteer(fbMsg);
+        // Llamada directa a nuestro script nativo. Enviamos un objeto destructurado.
+        const resultAutomator = await publishViaPuppeteer({ message: fbMsg });
         fbRes = resultAutomator; // "[POST PUBLICADO EXITOSAMENTE]" o el error respectivo
       } catch(e) { 
         fbRes = `[ERROR FATAL PUBLICANDO: ${e.message}]`; 
       }
       
       result = await chat.sendMessage([{ functionResponse: { name: "publishToFacebook", response: { result: fbRes } } }]);
+    }
+    else if (call.name === 'listFacebookGroups') {
+      let fbRes = "[INICIANDO EXTRACCIÓN DE GRUPOS...]";
+      try {
+        console.log(`[Facebook] Agente solicitó extraer grupos...`);
+        const grupos = await getFacebookGroups();
+        
+        if (grupos.length === 0) {
+           fbRes = "[FB ADMIN] La extracción terminó, pero se detectaron 0 grupos. ¿La cuenta es nueva o hay un problema de interfaz?";
+        } else {
+           const lista = grupos.map((g, i) => `${i+1}. ${g.name} (URL: ${g.url})`).join("\n");
+           fbRes = `[FB ADMIN] ÉXITO. Se encontraron ${grupos.length} grupos.\nListado completo:\n${lista}`;
+        }
+      } catch(e) {
+        fbRes = `[ERROR FATAL EXTRAYENDO GRUPOS: ${e.message}]`;
+      }
+      result = await chat.sendMessage([{ functionResponse: { name: "listFacebookGroups", response: { result: fbRes } } }]);
+    }
+    else if (call.name === 'publishInFacebookGroups') {
+      const { groupIds, message } = call.args;
+      let fbRes = "";
+      try {
+        console.log(`[Facebook] Agente solicitó publicar en ${groupIds.length} grupos.`);
+        fbRes = await publishToGroups(groupIds, message);
+      } catch(e) {
+        fbRes = `[ERROR FATAL PUBLICANDO EN GRUPOS: ${e.message}]`;
+      }
+      result = await chat.sendMessage([{ functionResponse: { name: "publishInFacebookGroups", response: { result: fbRes } } }]);
+    }
+    else if (call.name === 'readFacebookFeed') {
+      const limit = call.args.limit || 5;
+      let fbRes = "";
+      try {
+        console.log(`[Facebook] Agente solicitó leer el feed de perfil (limite: ${limit}).`);
+        const posts = await getProfileFeed(limit);
+        fbRes = JSON.stringify(posts, null, 2);
+      } catch(e) {
+        fbRes = `[ERROR FATAL EXTRACCION DE FEED: ${e.message}]`;
+      }
+      result = await chat.sendMessage([{ functionResponse: { name: "readFacebookFeed", response: { result: fbRes } } }]);
+    }
+    else if (call.name === 'readFacebookNotifications') {
+      const limit = call.args.limit || 10;
+      let fbRes = "";
+      try {
+        console.log(`[Facebook] Agente solicitó leer notificaciones (limite: ${limit}).`);
+        const notifs = await getFacebookNotifications(limit);
+        fbRes = JSON.stringify(notifs, null, 2);
+      } catch(e) {
+        fbRes = `[ERROR FATAL LEYENDO NOTIFICACIONES: ${e.message}]`;
+      }
+      result = await chat.sendMessage([{ functionResponse: { name: "readFacebookNotifications", response: { result: fbRes } } }]);
+    }
+    else if (call.name === 'readFacebookActivityLog') {
+      const limit = call.args.limit || 10;
+      let fbRes = "";
+      try {
+        console.log(`[Facebook] Agente solicitó leer Registro de Actividad (limite: ${limit}).`);
+        const log = await getFacebookActivityLog(limit);
+        fbRes = JSON.stringify(log, null, 2);
+      } catch(e) {
+        fbRes = `[ERROR FATAL LEYENDO REGISTRO ACTIVIDAD: ${e.message}]`;
+      }
+      result = await chat.sendMessage([{ functionResponse: { name: "readFacebookActivityLog", response: { result: fbRes } } }]);
     }
   }
 
