@@ -485,7 +485,16 @@ export async function publishToGroups(groupIds, message) {
         await fbPage.keyboard.type(char, { delay: randomInt(30, 100) });
         if (Math.random() < 0.05) await randomDelay(300, 600);
       }
-      await randomDelay(1000, 2000);
+      
+      if (message.includes('http')) {
+         console.log(`[Grupos] Link detectado en el mensaje. Esperando 8 segundos para que Facebook genere la tarjeta de metadatos...`);
+         await new Promise(r => setTimeout(r, 8000));
+         // Damos un espacio extra para asegurar que el DOM actualice el estado del botón Publicar
+         await fbPage.keyboard.type(' ');
+         await randomDelay(1000, 2000);
+      } else {
+         await randomDelay(1000, 2000);
+      }
 
       const btnClicked = await fbPage.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('div[aria-label="Publicar"], div[aria-label="Post"]'));
