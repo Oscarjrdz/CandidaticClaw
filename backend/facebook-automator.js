@@ -225,6 +225,7 @@ export async function publishViaPuppeteer({ message }) {
     });
 
     if (!composerClicked) {
+      await fbPage.screenshot({ path: '/tmp/error-ui.png', fullPage: true });
       return "[ERROR UI] No pude encontrar el botón de publicación. ¿La página cargó bien?";
     }
 
