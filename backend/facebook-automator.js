@@ -6,7 +6,9 @@ import fs, { existsSync } from 'fs';
 // Activar plugin anti-detección con TODOS los evasiones
 puppeteerExtra.use(StealthPlugin());
 
-const IS_SERVER = require('os').platform() === 'linux';
+import os from 'os';
+
+const IS_SERVER = os.platform() === 'linux';
 const CHROME_PROFILE_PATH = '/root/chrome-profile';
 const CHROMIUM_PATH = '/usr/bin/google-chrome-stable';
 
