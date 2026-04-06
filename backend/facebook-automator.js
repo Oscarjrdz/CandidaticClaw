@@ -254,7 +254,8 @@ export async function publishViaPuppeteer({ message }) {
     });
 
     if (!textboxFound) {
-      return "[ERROR UI] No pude detectar el cuadro de texto del post (tardó mucho en cargar).";
+      await fbPage.screenshot({ path: '/root/CandidaticClaw/backend/fb-error-ui.png' });
+      return "[ERROR UI] No pude detectar el cuadro de texto del post (tardó mucho en cargar). Revisar fb-error-ui.png";
     }
 
     // === PASO EXTRA: Forzar privacidad a Público (si existe selector) ===
@@ -344,16 +345,17 @@ export async function publishViaPuppeteer({ message }) {
       if (!postClicked) {
         return "[ERROR UI] Dejé el texto escrito, pero el botón 'Publicar' no apareció.";
       }
-
-      // Esperar a que se publique
-      await randomDelay(3000, 5000);
     } catch (e) {
-      if (e.message.includes('Promise was collected') || e.message.includes('Session closed') || e.message.includes('TargetCloseError')) {
+      if (e.message && (e.message.includes('Promise was collected') || e.message.includes('Session closed') || e.message.includes('TargetCloseError') || e.message.includes('Execution context'))) {
         console.log('[Facebook Automator] Ignorando error de sesión cerrada al dar click a publicar (¡el post se mandó exitosamente!).');
       } else {
         throw e;
       }
     }
+
+    // Esperar obligatoriamente 8 segundos ANTES de cerrar el navegador para que Facebook termine el request AJAX.
+    console.log('[Facebook Automator] Dando 8 segundos a Facebook para procesar la petición HTTP...');
+    await new Promise(r => setTimeout(r, 8000));
 
     // Registrar timestamp del post
     lastPostTime = Date.now();
