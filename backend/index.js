@@ -409,28 +409,34 @@ async function sendTelegramMessage(chatId, text, retries = 3) {
   }
 }
 
-// Registrar webhook en Telegram al iniciar
-async function registerTelegramWebhook() {
+// Iniciar Polling en lugar de Webhook (ya que el servidor es HTTP y no HTTPS)
+let telegramOffset = 0;
+async function startTelegramPolling() {
   if (!TELEGRAM_BOT_TOKEN) {
     console.log('[Telegram] Sin TELEGRAM_BOT_TOKEN — canal desactivado');
     return;
   }
-  const webhookUrl = `${VPS_PUBLIC_URL}/telegram/webhook`;
-  try {
-    const res = await fetch(`${TELEGRAM_API}/setWebhook`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      console.log(`[Telegram] ✅ Webhook registrado: ${webhookUrl}`);
-    } else {
-      console.error('[Telegram] ❌ Error registrando webhook:', data.description);
+  
+  // Limpiar webhooks atorados
+  await fetch(`${TELEGRAM_API}/deleteWebhook`);
+  console.log(`[Telegram] ✅ Polling interno iniciado (sin necesidad de webhook HTTPS)`);
+
+  setInterval(async () => {
+    try {
+      const res = await fetch(`${TELEGRAM_API}/getUpdates?offset=${telegramOffset}&timeout=10`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.ok || !data.result) return;
+      
+      for (const update of data.result) {
+        telegramOffset = update.update_id + 1;
+        // background task so it doesn't block polling thread
+        handleTelegramUpdate(update);
+      }
+    } catch (e) {
+      // Ignorar errores de red temporales
     }
-  } catch (e) {
-    console.error('[Telegram] Error de red al registrar webhook:', e.message);
-  }
+  }, 2000);
 }
 
 // ── WHATSAPP (conecta con tu gateway Baileys existente) ───────────────────────
@@ -461,13 +467,9 @@ async function sendWhatsAppMessage(phone, text, retries = 3) {
 // SECTION 1 — TELEGRAM WEBHOOK
 // ============================================================
 
-// Telegram llama a este endpoint con cada mensaje recibido
-app.post('/telegram/webhook', async (req, res) => {
-  // Siempre responder 200 rápido a Telegram para evitar reintentos
-  res.sendStatus(200);
-
+// Telegram maneja cada mensaje mediante polling u opcionalmente esto
+async function handleTelegramUpdate(update) {
   try {
-    const update = req.body;
     const message = update.message || update.edited_message;
     if (!message) return;
 
@@ -556,6 +558,11 @@ app.post('/telegram/webhook', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   }
+}
+
+app.post('/telegram/webhook', async (req, res) => {
+  res.sendStatus(200);
+  handleTelegramUpdate(req.body);
 });
 
 // Endpoint para consultar el estado del webhook de Telegram
@@ -799,5 +806,5 @@ app.listen(PORT, async () => {
   console.log(`   WhatsApp: ${WA_GATEWAY_URL ? `✅ gateway en ${WA_GATEWAY_URL}` : '⚠️  sin gateway'}`);
 
   // Registrar webhook de Telegram al arrancar
-  await registerTelegramWebhook();
+  await startTelegramPolling();
 });
